@@ -188,7 +188,6 @@ class PC12NGXConventionalAnalysisGroup(om.Group):
                 num_nodes=nn,
                 aircraft_model=PC12NGXConventionalAirplaneModel,
                 include_ground_roll=True,
-                include_descent=True,
             ),
             promotes_inputs=["*"],
             promotes_outputs=["*"],

@@ -30,7 +30,7 @@ import argparse
 import matplotlib.pyplot as plt
 import numpy as np
 import openmdao.api as om
-import openmdao.api as om
+
 from openmdao.api import (
     BoundsEnforceLS,
     DirectSolver,
@@ -221,7 +221,6 @@ class PC12NGXHydrogenAnalysisGroup(om.Group):
                 num_nodes=nn,
                 aircraft_model=PC12NGXHydrogenAirplaneModel,
                 include_ground_roll=True,
-                include_descent=True,
             ),
             promotes_inputs=["*"],
             promotes_outputs=["*"],

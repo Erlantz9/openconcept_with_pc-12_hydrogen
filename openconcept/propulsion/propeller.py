@@ -61,7 +61,7 @@ class SimplePropeller(Group):
         if n_blades == 3:
             propmap = propeller_map_Raymer(nn)
             staticpropmap = static_propeller_map_Raymer(nn)
-        if n_blades == 4:
+        elif n_blades in (4, 5):
             propmap = propeller_map_highpower(nn)
             staticpropmap = static_propeller_map_highpower(nn)
         else:

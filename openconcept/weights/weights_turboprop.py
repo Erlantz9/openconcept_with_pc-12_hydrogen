@@ -2,7 +2,9 @@ import numpy as np
 from openmdao.api import ExplicitComponent, IndepVarComp
 from openmdao.api import Group
 from openconcept.utilities import AddSubtractComp, ElementMultiplyDivideComp
-import math
+from types import SimpleNamespace
+
+math = SimpleNamespace(cos=np.cos, sin=np.sin, sqrt=np.sqrt, pi=np.pi)
 
 # TODO: add fuel system weight back in (depends on Wf, which depends on MTOW and We, and We depends on fuel system weight)
 

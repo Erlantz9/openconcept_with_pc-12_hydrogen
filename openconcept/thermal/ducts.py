@@ -104,6 +104,147 @@ class ExplicitIncompressibleDuct(ExplicitComponent):
     #     J['drag','delta_p_hex'] = (inputs['fltcond|Utrue'] - 2*mdot/inputs['area_nozzle']/inputs['fltcond|rho']) * dmdotddeltap
     #     J['drag','area_nozzle'] = (inputs['fltcond|Utrue'] - 2*mdot/inputs['area_nozzle']/inputs['fltcond|rho']) * dmdotdA + mdot * (mdot/inputs['area_nozzle']**2/inputs['fltcond|rho'])
 
+class ExplicitIncompressibleDuctWithInletLoss(ExplicitComponent):
+    """
+    This is an approximate model of a duct at incompressible speeds, 
+    now updated to include variable inlet area and spillage drag.
+    
+    Its advantage is low computational cost and improved convergence even at low speed.
+    It CANNOT model flow with heat addition so it will generally be a conservative estimate on the cooling drag.
+    Assumes the static pressure at the outlet duct = p_inf which may or may not be a good assumption.
+
+    Inputs
+    ------
+    fltcond|Utrue : float
+        True airspeed in the freestream (vector, m/s)
+    fltcond|rho : float
+        Density in the freestream (vector, kg/m**3)
+    area_inlet : float
+        Cross-sectional capture area of the duct inlet (vector, m**2)
+    area_nozzle : float
+        Cross-sectional area of the outlet nozzle (vector, m**2)
+        Generally must be the narrowest portion of the duct for analysis to be valid
+    delta_p_hex : float
+        Pressure drop across the heat exchanger (vector, Pa)
+
+    Outputs
+    -------
+    mdot : float
+        Mass flow rate through the duct (vector, kg/s)
+    drag : float
+        Total drag force on the duct including internal and spillage drag, positive rearwards (vector, N)
+
+    Options
+    -------
+    num_nodes : float
+        Number of analysis points to run
+    inlet_loss_factor : float
+        Delta p / local dynamic pressure to model inlet losses (dimensionless). Default 0.04 (Küchemann Book)
+    nozzle_loss_factor : float
+        Delta p / local dynamic pressure to model nozzle losses (dimensionless). Default 0.05
+    spillage_drag_coefficient : float
+        Fraction of dynamic pressure on the spilled area converted to drag. Default 0.6
+    gross_thrust_factor : float
+        Fraction of total gross thrust to recover (aka Cfg)
+        Accounts for duct losses, in particular nozzle losses. Default 0.98
+    """
+
+    def initialize(self):
+        self.options.declare("num_nodes", default=1)
+        self.options.declare("inlet_loss_factor", default=0.04)
+        self.options.declare("nozzle_loss_factor", default=0.05)
+        self.options.declare("spillage_drag_coefficient", default=0.6) # Typical values of K_spill range from 0.4 to 0.7
+        self.options.declare("gross_thrust_factor", default=0.98)
+
+    def setup(self):
+        nn = self.options["num_nodes"]
+        self.add_input("fltcond|Utrue", shape=(nn,), units="m/s")
+        self.add_input("fltcond|rho", shape=(nn,), units="kg/m**3")
+        self.add_input("area_inlet", shape=(nn,), units="m**2")
+        self.add_input("area_nozzle", shape=(nn,), units="m**2")
+        self.add_input("delta_p_hex", shape=(nn,), units="Pa") 
+
+        self.add_output("mdot", shape=(nn,), lower=0.01, units="kg/s")
+        self.add_output("drag", shape=(nn,), units="N")
+        self.add_output("internal_drag", shape=(nn,), units="N")
+        self.add_output("spillage_drag", shape=(nn,), units="N")
+
+        # Declare partials using complex step to handle the new inputs automatically
+        self.declare_partials(
+            ["drag", "internal_drag", "spillage_drag", "mdot"],
+            ["fltcond|Utrue", "fltcond|rho", "delta_p_hex", "area_inlet", "area_nozzle"], 
+            method="cs"
+        )
+
+    def compute(self, inputs, outputs):
+        # Extract options
+        k_in = self.options["inlet_loss_factor"]
+        k_noz = self.options["nozzle_loss_factor"]
+        k_spill = self.options["spillage_drag_coefficient"]
+        cfg = self.options["gross_thrust_factor"]
+
+        # Extract inputs
+        rho = inputs["fltcond|rho"]
+        u_true = inputs["fltcond|Utrue"]
+        a_in = inputs["area_inlet"]
+        a_noz = inputs["area_nozzle"]
+        dp_hex = inputs["delta_p_hex"]
+
+        # ---------------------------------------------------------
+        # 1. MASS FLOW CALCULATION
+        # ---------------------------------------------------------
+        # Numerator: Available energy (dynamic pressure + hex pressure drop)
+        numerator = (rho ** 2) * (u_true ** 2) + 2 * rho * dp_hex
+        
+        # Hack to prevent spurious NaNs during the Newton solve when dp_hex is highly negative
+        # We use a copy to be safe with complex step gradients if applicable
+        numerator = numerator.copy()
+        numerator[np.where(numerator < 0.0)] = 1e-10
+
+        # Denominator: Geometric resistance from inlet and nozzle
+        denominator = ((1 + k_noz) / a_noz**2) + (k_in / a_in**2)
+
+        mdot = np.sqrt(numerator / denominator)
+        
+        # Prevent negative or exactly zero mass flow
+        mdot = mdot.copy()
+        mdot[np.where(mdot < 0.0)] = 1e-10
+        outputs["mdot"] = mdot
+
+        # ---------------------------------------------------------
+        # 2. INTERNAL DRAG (Ram Drag - Gross Thrust)
+        # ---------------------------------------------------------
+        drag_internal = mdot * (u_true - cfg * mdot / (a_noz * rho))
+
+        # ---------------------------------------------------------
+        # 3. SPILLAGE DRAG
+        # ---------------------------------------------------------
+        # Protect against division by zero at very low speeds (e.g., ground roll)
+        u_safe = u_true.copy()
+        u_safe[np.where(u_safe < 1e-4)] = 1e-4
+        
+        # Capture area: Cross-section of the streamtube that actually enters the duct
+        a_cap = mdot / (rho * u_safe)
+        
+        # Spilled area: Area of the inlet that rejects flow
+        # If the duct demands more air than its physical size, spillage is zero
+        a_spill = a_in - a_cap
+        a_spill = a_spill.copy()
+        a_spill[np.where(a_spill < 0.0)] = 0.0
+        
+        # Freestream dynamic pressure
+        q_inf = 0.5 * rho * (u_true ** 2)
+        
+        # Spillage drag calculation
+        drag_spillage = k_spill * q_inf * a_spill
+
+        # ---------------------------------------------------------
+        # 4. TOTAL DRAG
+        # ---------------------------------------------------------
+        outputs["internal_drag"] = drag_internal
+        outputs["spillage_drag"] = drag_spillage
+        outputs["drag"] = drag_internal + drag_spillage
+
 
 class TemperatureIsentropic(ExplicitComponent):
     """
