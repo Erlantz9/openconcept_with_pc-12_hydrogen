@@ -12,7 +12,7 @@ import numpy as np
 import openmdao.api as om
 
 # Components used to assemble the conventional aircraft and mission model.
-from openconcept.propulsion.systems.simple_turboprop import PC12NGXPropulsionSystem
+from openconcept.propulsion import TurbopropPropulsionSystem
 from openconcept.aerodynamics import PolarDrag
 from openconcept.weights import SingleTurboPropEmptyWeight
 from openconcept.mission import BasicMission
@@ -43,11 +43,11 @@ class PC12NGXConventionalAirplaneModel(om.Group):
 
         # ======================================== Propulsion ========================================
         # rst Propulsion (beg)
-        # Add the conventional turboprop model and expose the flight conditions,
-        # engine rating, propeller diameter, and throttle needed to calculate thrust.
+        # Feed the PC-12 engine rating and propeller diameter from acdata into
+        # the generic turboprop model through these promoted inputs.
         self.add_subsystem(
             "propmodel",
-            PC12NGXPropulsionSystem(num_nodes=nn),
+            TurbopropPropulsionSystem(num_nodes=nn),
             promotes_inputs=[
                 "fltcond|rho",
                 "fltcond|Utrue",
@@ -57,8 +57,7 @@ class PC12NGXConventionalAirplaneModel(om.Group):
             ],
             promotes_outputs=["thrust"],
         )
-        # Set the Hartzell five-blade propeller speed to the PC-12 NGX maximum
-        # of 1,700 rpm for this conventional-aircraft analysis.
+        # Set propeller speed to the PC-12 NGX maximum of 1,700 rpm.
         self.set_input_defaults("propmodel.prop1.rpm", val=np.full(nn, 1700.0), units="rpm") 
         # rst Propulsion (end)
 
