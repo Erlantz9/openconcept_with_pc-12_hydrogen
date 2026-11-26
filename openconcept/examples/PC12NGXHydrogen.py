@@ -44,9 +44,9 @@ from openmdao.api import (
 from openconcept.aerodynamics import PolarDrag
 from openconcept.examples.aircraft_data.PC12NGXHydrogen import data as acdata
 from openconcept.mission import BasicMission
+from openconcept.energy_storage.hydrogen.LH2_tank_no_boil_off import LH2TankSizing
 from openconcept.propulsion.systems.simple_fuel_cell_hybrid import (
     FuelCellPropulsionSystemIncompressible,
-    LH2TankSizing,
 )
 from openconcept.utilities import AddSubtractComp, DictIndepVarComp, Integrator
 from openconcept.weights import SingleTurboPropEmptyWeight

@@ -268,3 +268,63 @@ class InitialLH2MassModification(om.ExplicitComponent):
         partials["fill_level", "length"] = (
             partials["m_liq", "length"] / (rho * V_tank) - m_liq / (rho * V_tank) ** 2 * rho * Vtank_L
         )
+
+class LH2TankSizing(om.ExplicitComponent):
+    """
+    Calculates the required hydrogen tank mass and total storage system mass 
+    based on the total mission fuel consumption and a target gravimetric index.
+
+    The Gravimetric Index (GI) is defined as:
+        GI = mass_fuel / (mass_fuel + mass_tank_structure)
+    
+    Rearranging to find the structural tank mass:
+        mass_tank_structure = mass_fuel * (1 - GI) / GI
+
+    Inputs
+    ------
+    fuel_consumed : float
+        Total mass of liquid hydrogen consumed during the mission (scalar, kg)
+
+    Outputs
+    -------
+    tank_structural_mass : float
+        Dry mass of the hydrogen tank structure, insulation, and system (scalar, kg)
+    total_tank_system_mass : float
+        Combined mass of the fuel and the dry tank structure (scalar, kg)
+
+    Options
+    -------
+    gravimetric_index : float
+        Ratio of stored hydrogen mass to total storage system mass (default: 0.20)
+    """
+
+    def initialize(self):
+        self.options.declare(
+            "gravimetric_index", 
+            default=0.2, 
+            desc="Gravimetric index of the tank (mass_fuel / mass_total)"
+        )
+
+    def setup(self):
+        self.add_input("fuel_consumed", val=0.0, units="kg")
+
+        self.add_output("tank_structural_mass", val=0.0, units="kg")
+        self.add_output("total_tank_system_mass", val=0.0, units="kg")
+
+        self.declare_partials(of="*", wrt="fuel_consumed", method="exact")
+
+    def compute(self, inputs, outputs):
+        fuel_consumed = inputs["fuel_consumed"]
+        gi = self.options["gravimetric_index"]
+
+        # Structural dry mass calculation: m_struct = m_fuel * (1 - GI) / GI
+        tank_dry_mass = fuel_consumed * (1.0 - gi) / gi
+        
+        outputs["tank_structural_mass"] = tank_dry_mass
+        outputs["total_tank_system_mass"] = fuel_consumed + tank_dry_mass
+
+    def compute_partials(self, inputs, partials):
+        gi = self.options["gravimetric_index"]
+
+        partials["tank_structural_mass", "fuel_consumed"] = (1.0 - gi) / gi
+        partials["total_tank_system_mass", "fuel_consumed"] = 1.0 / gi
